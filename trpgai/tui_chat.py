@@ -9,7 +9,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from .config import AppConfig, ProviderConfig, default_config_path, save_config
+from .config import AppConfig, McpConfig, McpServerConfig, ProviderConfig, default_config_path, save_config
 from .dice import DiceSyntaxError, roll_expression
 from .openai_client import ChatClient, ChatMessage
 from .tui_config import edit_config_tui_in_session
@@ -70,6 +70,27 @@ def _format_tool_result(tool_call_id: str | None, content: str | None) -> str:
         body = body[:2000] + "..."
 
     return header + "\n" + body
+
+
+def _tool_name_from_call(call: dict[str, Any]) -> str:
+    fn = call.get("function")
+    if isinstance(fn, dict):
+        name = fn.get("name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    return ""
+
+
+def _format_tool_status(tool_call_id: str, call: dict[str, Any], state: str, elapsed_s: float | None) -> str:
+    name = _tool_name_from_call(call)
+    header = f"{state}"
+    if name:
+        header += f"  {name}"
+    if tool_call_id:
+        header += f"  id={tool_call_id}"
+    if elapsed_s is not None:
+        header += f"  {elapsed_s:.2f}s"
+    return header
 
 
 def run_chat_tui(cfg: AppConfig, share_roll: bool, config_path: Path | None = None) -> int:
@@ -213,7 +234,7 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
 
             stdscr.addnstr(row, 0, line, max(0, w - 1), attr)
 
-        hint = "PgUp/PgDn scroll  Enter send  /roll  /config  /model  /reset  /exit"
+        hint = "PgUp/PgDn scroll  Enter send  /roll  /config  /model  /mcp  /reset  /exit"
         stdscr.addnstr(h - 2, 0, status or hint, max(0, w - 1))
 
         prompt = "you> "
@@ -307,13 +328,165 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
             if line in {"/help", "help", "?"}:
                 append(
                     "sys",
-                    "commands: /roll EXPR, /config, /provider [name], /providers, /models, /model provider:model, /reset, /exit",
+                    "commands: /roll EXPR, /config, /provider [name], /providers, /models, /model provider:model, /mcp, /reset, /exit",
                 )
                 continue
 
             if line.startswith("/reset"):
                 transcript = [("sys", "(session reset)")]
                 messages = _ensure_system_message([], cfg.chat.system_prompt)
+                continue
+
+            if line.startswith("/mcp"):
+                parts = line.split()
+                sub = parts[1].lower() if len(parts) >= 2 else "status"
+
+                def render_status() -> None:
+                    st = client.mcp_status()
+                    names = list(cfg.mcp.servers.keys())
+                    if not names:
+                        append("sys", "mcp: no servers configured")
+                        return
+
+                    lines: list[str] = []
+                    ok = 0
+                    err = 0
+                    off = 0
+                    tools_total = 0
+
+                    now = time.time()
+                    for name in names:
+                        scfg = cfg.mcp.servers[name]
+                        rt = st.get(name) or {}
+                        enabled = bool(scfg.enabled)
+                        mark = "*" if enabled else " "
+
+                        last_error = rt.get("last_error")
+                        initialized = bool(rt.get("initialized"))
+                        tool_count = rt.get("tool_count")
+                        last_sync = rt.get("last_sync")
+                        transport = str(scfg.transport or "auto")
+
+                        if not enabled:
+                            tag = "OFF"
+                            off += 1
+                        elif last_error:
+                            tag = "ERR"
+                            err += 1
+                        elif initialized:
+                            tag = "OK"
+                            ok += 1
+                        else:
+                            tag = "NEW"
+
+                        tools_str = "--"
+                        if isinstance(tool_count, int):
+                            tools_str = str(tool_count)
+                            tools_total += tool_count
+
+                        sync_str = "--"
+                        if isinstance(last_sync, (int, float)) and last_sync > 0:
+                            age = max(0, int(now - float(last_sync)))
+                            sync_str = f"{age}s"
+
+                        url = scfg.url
+                        base = f"{mark} {name:<10} {tag:<3} tools={tools_str:<3} sync={sync_str:<6} transport={transport}"
+                        if url:
+                            base += f" url={url}"
+                        lines.append(base)
+                        if last_error:
+                            lines.append(f"    last_error: {last_error}")
+
+                    append("sys", "mcp servers:\n" + "\n".join(lines))
+                    append("sys", f"mcp: ok={ok} err={err} off={off} tools_total={tools_total}")
+
+                if sub in {"status", "list"}:
+                    render_status()
+                    continue
+
+                if sub == "sync":
+                    target = parts[2] if len(parts) >= 3 else None
+                    if target is not None and target not in cfg.mcp.servers:
+                        append("err", f"unknown mcp server: {target}")
+                        continue
+                    if target is not None and not cfg.mcp.servers[target].enabled:
+                        append("err", f"mcp server disabled: {target} (use /mcp on {target})")
+                        continue
+
+                    append("sys", f"mcp: syncing{' ' + target if target else ''}...")
+                    status = "mcp syncing..."
+                    draw()
+                    try:
+                        client.mcp_sync(server_name=target)
+                    except Exception as e:
+                        append("err", f"mcp sync failed: {e}")
+                        continue
+                    render_status()
+                    continue
+
+                if sub == "tools":
+                    target = parts[2] if len(parts) >= 3 else None
+                    if target is not None and target not in cfg.mcp.servers:
+                        append("err", f"unknown mcp server: {target}")
+                        continue
+
+                    try:
+                        tools = client.mcp_tools(server_name=target)
+                    except Exception as e:
+                        append("err", f"mcp tools failed: {e}")
+                        continue
+
+                    if not tools:
+                        append("sys", "mcp: no tools loaded (try /mcp sync)")
+                        continue
+
+                    lines: list[str] = []
+                    for t in tools:
+                        server = str(t.get("server") or "")
+                        mcp_name = str(t.get("mcp_name") or "")
+                        public = str(t.get("public_name") or "")
+                        desc = str(t.get("description") or "")
+                        if desc:
+                            desc = desc.splitlines()[0]
+                        lines.append(f"{server}: {mcp_name} -> {public}  {desc}")
+
+                    append("sys", "mcp tools:\n" + "\n".join(lines))
+                    continue
+
+                if sub in {"on", "off", "enable", "disable"}:
+                    if len(parts) < 3:
+                        append("err", "usage: /mcp on|off <server>")
+                        continue
+                    name = parts[2]
+                    if name not in cfg.mcp.servers:
+                        append("err", f"unknown mcp server: {name} (edit via /config)")
+                        continue
+
+                    enabled = sub in {"on", "enable"}
+                    old = cfg.mcp.servers[name]
+                    servers = dict(cfg.mcp.servers)
+                    servers[name] = McpServerConfig(
+                        url=old.url,
+                        transport=old.transport,
+                        protocol_version=old.protocol_version,
+                        timeout_s=old.timeout_s,
+                        verify_tls=old.verify_tls,
+                        headers=old.headers,
+                        enabled=enabled,
+                    )
+                    cfg = AppConfig(
+                        active_provider=cfg.active_provider,
+                        providers=cfg.providers,
+                        chat=cfg.chat,
+                        mcp=McpConfig(servers=servers),
+                    )
+                    save_config(cfg, path)
+                    client = ChatClient(cfg)
+                    append("sys", f"mcp server {name}: enabled={enabled}")
+                    render_status()
+                    continue
+
+                append("err", "usage: /mcp [status|list|sync [server]|tools [server]|on <server>|off <server>]")
                 continue
 
             if line.startswith("/providers"):
@@ -349,7 +522,7 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
                 if arg not in cfg.providers:
                     append("err", f"unknown provider: {arg}")
                     continue
-                cfg = AppConfig(active_provider=arg, providers=cfg.providers, chat=cfg.chat)
+                cfg = AppConfig(active_provider=arg, providers=cfg.providers, chat=cfg.chat, mcp=cfg.mcp)
                 save_config(cfg, path)
                 client = ChatClient(cfg)
                 append("sys", f"switched provider: {arg}")
@@ -396,7 +569,7 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
                     model=model,
                 )
 
-                cfg = AppConfig(active_provider=prov, providers=providers, chat=cfg.chat)
+                cfg = AppConfig(active_provider=prov, providers=providers, chat=cfg.chat, mcp=cfg.mcp)
                 save_config(cfg, path)
                 client = ChatClient(cfg)
                 append("sys", f"switched model: {prov}:{model}")
@@ -440,6 +613,8 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
             last_draw = 0.0
             last_event_draw = 0.0
 
+            tool_status_slots: dict[str, tuple[int, float, dict[str, Any]]] = {}
+
             def on_stream(ev: dict[str, Any]) -> None:
                 nonlocal stream_text, last_draw
                 if ev.get("type") == "content_delta":
@@ -475,13 +650,37 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
                 elif t == "tool_result":
                     tool_call_id = ev.get("tool_call_id")
                     content = ev.get("content")
-                    append("tool", _format_tool_result(str(tool_call_id) if tool_call_id else None, content))
+                    tool_call_id_s = str(tool_call_id) if tool_call_id else ""
+
+                    if tool_call_id_s and tool_call_id_s in tool_status_slots:
+                        slot, start_t, call = tool_status_slots[tool_call_id_s]
+                        elapsed = time.monotonic() - start_t
+                        if 0 <= slot < len(transcript):
+                            transcript[slot] = ("tool", _format_tool_status(tool_call_id_s, call, "DONE", elapsed))
+                        tool_status_slots.pop(tool_call_id_s, None)
+
+                    append("tool", _format_tool_result(tool_call_id_s or None, content))
+
+                elif t == "tool_start":
+                    tool_call_id = ev.get("tool_call_id")
+                    call = ev.get("call")
+                    tool_call_id_s = str(tool_call_id) if tool_call_id else ""
+                    call_d = call if isinstance(call, dict) else {}
+
+                    if tool_call_id_s:
+                        slot = len(transcript)
+                        transcript.append(("tool", _format_tool_status(tool_call_id_s, call_d, "RUNNING", None)))
+                        tool_status_slots[tool_call_id_s] = (slot, time.monotonic(), call_d)
 
                 elif t == "assistant_final":
                     content = ev.get("content")
                     if isinstance(content, str):
                         if not (cfg.chat.stream and stream_text):
                             append("ai", content)
+
+                elif t == "mcp_error":
+                    err = ev.get("error")
+                    append("err", f"mcp error: {err}")
 
                 now = time.monotonic()
                 if now - last_event_draw >= 0.02:

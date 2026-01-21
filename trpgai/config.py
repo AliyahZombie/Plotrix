@@ -45,15 +45,62 @@ class ChatConfig:
 
 
 @dataclass(frozen=True)
+class McpServerConfig:
+    # Base URL for Streamable HTTP endpoint (e.g. https://host/mcp)
+    # or base host for legacy SSE (we'll probe /sse).
+    url: str = ""
+
+    # auto | streamable_http | legacy_sse
+    transport: str = "auto"
+    protocol_version: str = "2025-11-25"
+
+    timeout_s: float = 60.0
+    verify_tls: bool = True
+    headers: dict[str, str] = field(default_factory=dict)
+
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
+class McpConfig:
+    servers: dict[str, McpServerConfig] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class AppConfig:
     active_provider: str = "default"
     providers: dict[str, ProviderConfig] = field(default_factory=lambda: {"default": ProviderConfig()})
     chat: ChatConfig = field(default_factory=ChatConfig)
+    mcp: McpConfig = field(default_factory=McpConfig)
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "AppConfig":
         data = data if isinstance(data, dict) else {}
         chat_data = (data.get("chat") or {}) if isinstance(data.get("chat"), dict) else {}
+
+        mcp_data = (data.get("mcp") or {}) if isinstance(data.get("mcp"), dict) else {}
+        mcp_servers: dict[str, McpServerConfig] = {}
+        raw_servers = mcp_data.get("servers")
+        if isinstance(raw_servers, dict):
+            for name, s in raw_servers.items():
+                if not isinstance(name, str) or not name:
+                    continue
+                if not isinstance(s, dict):
+                    continue
+                headers: dict[str, str] = {}
+                raw_headers = s.get("headers")
+                if isinstance(raw_headers, dict):
+                    headers = {str(k): str(v) for k, v in raw_headers.items()}
+
+                mcp_servers[name] = McpServerConfig(
+                    url=str(s.get("url", "")),
+                    transport=str(s.get("transport", McpServerConfig.transport)),
+                    protocol_version=str(s.get("protocol_version", McpServerConfig.protocol_version)),
+                    timeout_s=float(s.get("timeout_s", McpServerConfig.timeout_s)),
+                    verify_tls=bool(s.get("verify_tls", McpServerConfig.verify_tls)),
+                    headers=headers,
+                    enabled=bool(s.get("enabled", McpServerConfig.enabled)),
+                )
 
         providers: dict[str, ProviderConfig] = {}
         providers_data = data.get("providers")
@@ -157,7 +204,12 @@ class AppConfig:
             enable_tool_roll=bool(chat_data.get("enable_tool_roll", ChatConfig.enable_tool_roll)),
         )
 
-        return AppConfig(active_provider=active_provider, providers=providers, chat=chat)
+        return AppConfig(
+            active_provider=active_provider,
+            providers=providers,
+            chat=chat,
+            mcp=McpConfig(servers=mcp_servers),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -183,7 +235,7 @@ def load_config(path: Path | None = None) -> AppConfig:
                     models=p.models,
                     model=p.model,
                 )
-                cfg = AppConfig(active_provider=cfg.active_provider, providers=providers, chat=cfg.chat)
+                cfg = AppConfig(active_provider=cfg.active_provider, providers=providers, chat=cfg.chat, mcp=cfg.mcp)
         return cfg
 
     try:
@@ -206,7 +258,7 @@ def load_config(path: Path | None = None) -> AppConfig:
                 models=p.models,
                 model=p.model,
             )
-            cfg = AppConfig(active_provider=cfg.active_provider, providers=providers, chat=cfg.chat)
+            cfg = AppConfig(active_provider=cfg.active_provider, providers=providers, chat=cfg.chat, mcp=cfg.mcp)
 
     return cfg
 

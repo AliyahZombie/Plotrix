@@ -57,6 +57,7 @@ def _edit_config(c: Any, stdscr: Any, cfg: AppConfig, path: Path) -> AppConfig:
     def fields() -> list[dict[str, Any]]:
         providers = work.setdefault("providers", {})
         chat = work.setdefault("chat", {})
+        mcp = work.setdefault("mcp", {})
 
         active = str(work.get("active_provider") or "default")
 
@@ -68,6 +69,15 @@ def _edit_config(c: Any, stdscr: Any, cfg: AppConfig, path: Path) -> AppConfig:
             providers[active] = asdict(ProviderConfig())
 
         p = providers[active]
+
+        if not isinstance(mcp, dict):
+            mcp = {}
+            work["mcp"] = mcp
+
+        servers = mcp.get("servers")
+        if not isinstance(servers, dict):
+            servers = {}
+            mcp["servers"] = servers
 
         def get_models_text() -> str:
             raw = p.get("models")
@@ -95,6 +105,8 @@ def _edit_config(c: Any, stdscr: Any, cfg: AppConfig, path: Path) -> AppConfig:
             {"key": f"providers.{active}.timeout_s", "kind": "float", "get": lambda: str(p.get("timeout_s", "")), "set": lambda v: p.__setitem__("timeout_s", v)},
             {"key": f"providers.{active}.verify_tls", "kind": "bool", "get": lambda: bool(p.get("verify_tls", True)), "set": lambda v: p.__setitem__("verify_tls", v)},
             {"key": f"providers.{active}.extra_headers", "kind": "json", "get": lambda: json.dumps(p.get("extra_headers", {}) or {}, ensure_ascii=True), "set": lambda v: p.__setitem__("extra_headers", v)},
+
+            {"key": "mcp.servers", "kind": "json", "get": lambda: json.dumps(servers, ensure_ascii=True), "set": lambda v: mcp.__setitem__("servers", v)},
 
             {"key": "chat.system_prompt", "kind": "text", "get": lambda: str(chat.get("system_prompt", "")), "set": lambda v: chat.__setitem__("system_prompt", v)},
             {"key": "chat.temperature", "kind": "float_or_empty", "get": lambda: "" if chat.get("temperature") is None else str(chat.get("temperature")), "set": lambda v: chat.__setitem__("temperature", v)},

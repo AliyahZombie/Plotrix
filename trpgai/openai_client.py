@@ -9,6 +9,7 @@ from typing import Any
 
 from .config import AppConfig, ProviderConfig
 from .dice import DiceSyntaxError, roll_expression
+from .mcp_client import McpError, McpManager
 
 
 def _accumulate_tool_calls(
@@ -84,6 +85,28 @@ class ChatMessage:
 class ChatClient:
     def __init__(self, cfg: AppConfig):
         self._cfg = cfg
+        self._mcp = McpManager(cfg.mcp.servers)
+
+    def mcp_status(self) -> dict[str, dict[str, Any]]:
+        return self._mcp.status()
+
+    def mcp_sync(self, server_name: str | None = None) -> dict[str, dict[str, Any]]:
+        self._mcp.refresh_tools(server_name=server_name)
+        return self._mcp.status()
+
+    def mcp_tools(self, server_name: str | None = None) -> list[dict[str, Any]]:
+        tools = self._mcp.tools(server_name=server_name)
+        out: list[dict[str, Any]] = []
+        for t in tools:
+            out.append(
+                {
+                    "server": t.server,
+                    "mcp_name": t.mcp_name,
+                    "public_name": t.public_name,
+                    "description": t.description,
+                }
+            )
+        return out
 
     def _provider(self) -> ProviderConfig:
         p = self._cfg.providers.get(self._cfg.active_provider)
@@ -97,6 +120,14 @@ class ChatClient:
         on_stream: Any | None = None,
         on_event: Any | None = None,
     ) -> tuple[str, list[ChatMessage]]:
+        def emit(ev: dict[str, Any]) -> None:
+            try:
+                if callable(on_event):
+                    on_event(ev)
+            except Exception:
+                # UI callbacks should never break core chat.
+                pass
+
         provider = self._provider()
         endpoint = provider.base_url.rstrip("/") + "/v1/chat/completions"
 
@@ -121,16 +152,14 @@ class ChatClient:
                 }
             )
 
+        if self._mcp.has_servers():
+            try:
+                tools.extend(self._mcp.openai_tools())
+            except Exception as e:
+                emit({"type": "mcp_error", "error": str(e)})
+
         max_iters = 8
         current = list(messages)
-
-        def emit(ev: dict[str, Any]) -> None:
-            try:
-                if callable(on_event):
-                    on_event(ev)
-            except Exception:
-                # UI callbacks should never break core chat.
-                pass
 
         for _ in range(max_iters):
             model = provider.model
@@ -220,7 +249,16 @@ class ChatClient:
                     }
                 )
 
-                for call in tool_calls:
+                for i, call in enumerate(tool_calls):
+                    if not isinstance(call, dict):
+                        continue
+
+                    # Some providers omit id; we need a stable id to tie UI + tool results.
+                    if not call.get("id"):
+                        call["id"] = f"call_{i}"  # noqa: PERF401
+
+                    emit({"type": "tool_start", "call": call, "tool_call_id": str(call.get("id") or "")})
+
                     tool_msg = self._handle_tool_call(call)
                     current.append(tool_msg)
                     emit(
@@ -247,6 +285,25 @@ class ChatClient:
         raw_args = fn.get("arguments")
 
         if name != "roll_dice":
+            if self._mcp.has_servers() and name.startswith("mcp"):
+                args: dict[str, Any] = {}
+                if isinstance(raw_args, str) and raw_args.strip():
+                    try:
+                        parsed = json.loads(raw_args)
+                        if isinstance(parsed, dict):
+                            args = parsed
+                    except json.JSONDecodeError:
+                        args = {}
+
+                try:
+                    result = self._mcp.call_tool(name, args)
+                except McpError as e:
+                    content = json.dumps({"error": str(e)}, ensure_ascii=True)
+                    return ChatMessage(role="tool", tool_call_id=call_id, content=content)
+
+                content = json.dumps(result, ensure_ascii=True)
+                return ChatMessage(role="tool", tool_call_id=call_id, content=content)
+
             content = json.dumps({"error": f"unknown tool: {name}"}, ensure_ascii=True)
             return ChatMessage(role="tool", tool_call_id=call_id, content=content)
 
