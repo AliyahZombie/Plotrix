@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import ssl
+import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -87,9 +88,11 @@ class ChatMessage:
 
 
 class ChatClient:
-    def __init__(self, cfg: AppConfig):
+    def __init__(self, cfg: AppConfig, mcp: McpManager | None = None):
         self._cfg = cfg
-        self._mcp = McpManager(cfg.mcp.servers)
+        # Allow sharing one MCP manager across multiple ChatClient instances
+        # (e.g., for a web UI) so tool sync/status stay consistent.
+        self._mcp = mcp if mcp is not None else McpManager(cfg.mcp.servers)
 
     def mcp_status(self) -> dict[str, dict[str, Any]]:
         return self._mcp.status()
@@ -123,6 +126,7 @@ class ChatClient:
         messages: list[ChatMessage],
         on_stream: Any | None = None,
         on_event: Any | None = None,
+        cancel: threading.Event | None = None,
     ) -> tuple[str, list[ChatMessage]]:
         def emit(ev: dict[str, Any]) -> None:
             try:
@@ -166,6 +170,9 @@ class ChatClient:
         current = list(messages)
 
         for _ in range(max_iters):
+            if cancel is not None and cancel.is_set():
+                raise ChatCancelledError("cancelled")
+
             model = provider.model
             if not model and provider.models:
                 model = provider.models[0]
@@ -203,7 +210,7 @@ class ChatClient:
                     if callable(on_stream):
                         on_stream({"type": "start"})
                     assistant_content, tool_calls = self._post_json_stream(
-                        endpoint, payload, on_stream=on_stream
+                        endpoint, payload, on_stream=on_stream, cancel=cancel
                     )
                     if callable(on_stream):
                         on_stream(
@@ -213,6 +220,8 @@ class ChatClient:
                                 "tool_calls": tool_calls,
                             }
                         )
+                except ChatCancelledError:
+                    raise
                 except Exception:
                     stream_enabled = False
                     payload.pop("stream", None)
@@ -251,6 +260,9 @@ class ChatClient:
                 for i, call in enumerate(tool_calls):
                     if not isinstance(call, dict):
                         continue
+
+                    if cancel is not None and cancel.is_set():
+                        raise ChatCancelledError("cancelled")
                     if not call.get("id"):
                         call["id"] = f"call_{i}"  # noqa: PERF401
 
@@ -416,6 +428,7 @@ class ChatClient:
         url: str,
         payload: dict[str, Any],
         on_stream: Any,
+        cancel: threading.Event | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         provider = self._provider()
         headers = {
@@ -450,6 +463,8 @@ class ChatClient:
                 req, timeout=float(provider.timeout_s), context=context
             ) as resp:
                 while True:
+                    if cancel is not None and cancel.is_set():
+                        raise ChatCancelledError("cancelled")
                     raw = resp.readline()
                     if not raw:
                         break
@@ -501,3 +516,7 @@ class ChatClient:
             raise RuntimeError(f"network error: {e}") from None
 
         return "".join(assistant_parts), tool_calls_acc
+
+
+class ChatCancelledError(RuntimeError):
+    """Raised when a chat run is cancelled by the UI."""

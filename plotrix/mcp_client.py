@@ -360,6 +360,7 @@ class _LegacySseTransport:
 
 class McpManager:
     def __init__(self, servers: dict[str, McpServerConfig]):
+        self._lock = threading.RLock()
         # Keep disabled servers too; UI needs to display them.
         self._servers = dict(servers)
         self._clients: dict[str, Any] = {}
@@ -377,201 +378,212 @@ class McpManager:
             }
 
     def has_servers(self) -> bool:
-        for cfg in self._servers.values():
-            if cfg.enabled and cfg.url:
-                return True
-        return False
+        with self._lock:
+            for cfg in self._servers.values():
+                if cfg.enabled and cfg.url:
+                    return True
+            return False
 
     def status(self) -> dict[str, dict[str, Any]]:
-        # name -> runtime snapshot
-        out: dict[str, dict[str, Any]] = {}
-        for name, cfg in self._servers.items():
-            rt = dict(self._runtime.get(name) or {})
-            rt["enabled"] = bool(cfg.enabled)
-            rt["url"] = cfg.url
-            rt["transport"] = cfg.transport
-            out[name] = rt
-        return out
+        with self._lock:
+            # name -> runtime snapshot
+            out: dict[str, dict[str, Any]] = {}
+            for name, cfg in self._servers.items():
+                rt = dict(self._runtime.get(name) or {})
+                rt["enabled"] = bool(cfg.enabled)
+                rt["url"] = cfg.url
+                rt["transport"] = cfg.transport
+                out[name] = rt
+            return out
 
     def refresh_tools(self, server_name: str | None = None) -> None:
-        tools: list[McpTool] = []
-        public_to_tool: dict[str, McpTool] = {}
+        with self._lock:
+            tools: list[McpTool] = []
+            public_to_tool: dict[str, McpTool] = {}
 
-        if server_name is None:
-            target_names: list[str] = list(self._servers.keys())
-        else:
-            target_names = [server_name]
+            if server_name is None:
+                target_names: list[str] = list(self._servers.keys())
+            else:
+                target_names = [server_name]
 
-        for name in target_names:
-            cfg = self._servers.get(name)
-            if cfg is None:
-                continue
+            for name in target_names:
+                cfg = self._servers.get(name)
+                if cfg is None:
+                    continue
 
-            # Keep runtime in sync with current config.
-            if name not in self._runtime:
-                self._runtime[name] = {
-                    "enabled": bool(cfg.enabled),
-                    "initialized": False,
-                    "tool_count": None,
-                    "last_error": None,
-                    "last_sync": None,
+                # Keep runtime in sync with current config.
+                if name not in self._runtime:
+                    self._runtime[name] = {
+                        "enabled": bool(cfg.enabled),
+                        "initialized": False,
+                        "tool_count": None,
+                        "last_error": None,
+                        "last_sync": None,
+                    }
+                self._runtime[name]["enabled"] = bool(cfg.enabled)
+
+                if not cfg.enabled:
+                    self._runtime[name]["initialized"] = False
+                    continue
+
+                if not cfg.url:
+                    self._runtime[name]["initialized"] = False
+                    self._runtime[name]["last_error"] = "missing url"
+                    continue
+
+                client = self._clients.get(name)
+                if client is None:
+                    client = self._make_client(cfg)
+                    self._clients[name] = client
+
+                # Initialize handshake.
+                init_params = {
+                    "protocolVersion": cfg.protocol_version,
+                    "clientInfo": {"name": "plotrix", "version": "0.1"},
+                    "capabilities": {"tools": {}},
                 }
-            self._runtime[name]["enabled"] = bool(cfg.enabled)
 
-            if not cfg.enabled:
-                self._runtime[name]["initialized"] = False
-                continue
-
-            if not cfg.url:
-                self._runtime[name]["initialized"] = False
-                self._runtime[name]["last_error"] = "missing url"
-                continue
-
-            client = self._clients.get(name)
-            if client is None:
-                client = self._make_client(cfg)
-                self._clients[name] = client
-
-            # Initialize handshake.
-            init_params = {
-                "protocolVersion": cfg.protocol_version,
-                "clientInfo": {"name": "plotrix", "version": "0.1"},
-                "capabilities": {"tools": {}},
-            }
-
-            try:
                 try:
-                    _ = client.call("initialize", init_params)
-                except McpError:
-                    # auto-transport fallback: if streamable HTTP fails, try legacy SSE.
-                    if (
-                        cfg.transport or "auto"
-                    ).lower().strip() == "auto" and not isinstance(
-                        client, _LegacySseTransport
-                    ):
-                        client = _LegacySseTransport(cfg)
-                        self._clients[name] = client
+                    try:
                         _ = client.call("initialize", init_params)
-                    else:
-                        raise
+                    except McpError:
+                        # auto-transport fallback: if streamable HTTP fails, try legacy SSE.
+                        if (
+                            cfg.transport or "auto"
+                        ).lower().strip() == "auto" and not isinstance(
+                            client, _LegacySseTransport
+                        ):
+                            client = _LegacySseTransport(cfg)
+                            self._clients[name] = client
+                            _ = client.call("initialize", init_params)
+                        else:
+                            raise
 
-                client.notify("initialized", {})
+                    client.notify("initialized", {})
 
-                resp = client.call("tools/list", {})
-                result = resp.get("result")
-                raw_tools = None
-                if isinstance(result, dict):
-                    raw_tools = result.get("tools")
+                    resp = client.call("tools/list", {})
+                    result = resp.get("result")
+                    raw_tools = None
+                    if isinstance(result, dict):
+                        raw_tools = result.get("tools")
 
-                if not isinstance(raw_tools, list):
-                    raise McpError("tools/list returned no tools")
+                    if not isinstance(raw_tools, list):
+                        raise McpError("tools/list returned no tools")
 
-            except Exception as e:
-                self._runtime[name]["initialized"] = False
-                self._runtime[name]["last_error"] = str(e)
-                continue
-
-            self._runtime[name]["initialized"] = True
-            self._runtime[name]["last_error"] = None
-            self._runtime[name]["last_sync"] = time.time()
-            self._runtime[name]["tool_count"] = int(len(raw_tools))
-
-            for t in raw_tools:
-                if not isinstance(t, dict):
+                except Exception as e:
+                    self._runtime[name]["initialized"] = False
+                    self._runtime[name]["last_error"] = str(e)
                     continue
-                mcp_name = t.get("name")
-                if not isinstance(mcp_name, str) or not mcp_name:
-                    continue
-                desc = t.get("description")
-                desc_s = str(desc) if desc is not None else ""
-                schema = t.get("inputSchema")
-                if not isinstance(schema, dict):
-                    schema = {"type": "object", "properties": {}}
 
-                public = _mcp_tool_public_name(name, mcp_name)
-                tool = McpTool(
-                    server=name,
-                    mcp_name=mcp_name,
-                    public_name=public,
-                    description=desc_s,
-                    input_schema=schema,
-                )
-                tools.append(tool)
-                public_to_tool[public] = tool
+                self._runtime[name]["initialized"] = True
+                self._runtime[name]["last_error"] = None
+                self._runtime[name]["last_sync"] = time.time()
+                self._runtime[name]["tool_count"] = int(len(raw_tools))
 
-        # Only replace registry when refreshing all servers.
-        if server_name is None:
-            self._tools = tools
-            self._public_to_tool = public_to_tool
-        else:
-            # Merge: keep other tools intact.
-            keep = [t for t in self._tools if t.server != server_name]
-            self._tools = keep + tools
-            self._public_to_tool = {
-                k: v for k, v in self._public_to_tool.items() if v.server != server_name
-            }
-            self._public_to_tool.update(public_to_tool)
+                for t in raw_tools:
+                    if not isinstance(t, dict):
+                        continue
+                    mcp_name = t.get("name")
+                    if not isinstance(mcp_name, str) or not mcp_name:
+                        continue
+                    desc = t.get("description")
+                    desc_s = str(desc) if desc is not None else ""
+                    schema = t.get("inputSchema")
+                    if not isinstance(schema, dict):
+                        schema = {"type": "object", "properties": {}}
+
+                    public = _mcp_tool_public_name(name, mcp_name)
+                    tool = McpTool(
+                        server=name,
+                        mcp_name=mcp_name,
+                        public_name=public,
+                        description=desc_s,
+                        input_schema=schema,
+                    )
+                    tools.append(tool)
+                    public_to_tool[public] = tool
+
+            # Only replace registry when refreshing all servers.
+            if server_name is None:
+                self._tools = tools
+                self._public_to_tool = public_to_tool
+            else:
+                # Merge: keep other tools intact.
+                keep = [t for t in self._tools if t.server != server_name]
+                self._tools = keep + tools
+                self._public_to_tool = {
+                    k: v
+                    for k, v in self._public_to_tool.items()
+                    if v.server != server_name
+                }
+                self._public_to_tool.update(public_to_tool)
 
     def openai_tools(self) -> list[dict[str, Any]]:
-        if not self.has_servers():
-            return []
+        with self._lock:
+            if not self.has_servers():
+                return []
 
-        if not self._tools:
-            self.refresh_tools()
+            if not self._tools:
+                self.refresh_tools()
 
-        out: list[dict[str, Any]] = []
-        for t in self._tools:
-            out.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": t.public_name,
-                        "description": t.description,
-                        "parameters": t.input_schema,
-                    },
-                }
-            )
-        return out
+            out: list[dict[str, Any]] = []
+            for t in self._tools:
+                out.append(
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": t.public_name,
+                            "description": t.description,
+                            "parameters": t.input_schema,
+                        },
+                    }
+                )
+            return out
 
     def tools(self, server_name: str | None = None) -> list[McpTool]:
-        if not self._tools:
-            self.refresh_tools(server_name=None)
-        if server_name is None:
-            return list(self._tools)
-        return [t for t in self._tools if t.server == server_name]
+        with self._lock:
+            if not self._tools:
+                self.refresh_tools(server_name=None)
+            if server_name is None:
+                return list(self._tools)
+            return [t for t in self._tools if t.server == server_name]
 
     def call_tool(self, public_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        tool = self._public_to_tool.get(public_name)
-        if tool is None:
-            raise McpError(f"unknown mcp tool: {public_name}")
+        with self._lock:
+            tool = self._public_to_tool.get(public_name)
+            if tool is None:
+                raise McpError(f"unknown mcp tool: {public_name}")
 
-        cfg = self._servers.get(tool.server)
-        if cfg is None or not cfg.enabled:
-            raise McpError(f"mcp server disabled: {tool.server}")
+            cfg = self._servers.get(tool.server)
+            if cfg is None or not cfg.enabled:
+                raise McpError(f"mcp server disabled: {tool.server}")
 
-        client = self._clients.get(tool.server)
-        if client is None:
-            raise McpError(f"mcp server not initialized: {tool.server}")
+            client = self._clients.get(tool.server)
+            if client is None:
+                raise McpError(f"mcp server not initialized: {tool.server}")
 
-        resp = client.call(
-            "tools/call", {"name": tool.mcp_name, "arguments": arguments}
-        )
-        result = resp.get("result")
-        if not isinstance(result, dict):
-            return {"text": json.dumps(resp, ensure_ascii=True)}
+            resp = client.call(
+                "tools/call", {"name": tool.mcp_name, "arguments": arguments}
+            )
+            result = resp.get("result")
+            if not isinstance(result, dict):
+                return {"text": json.dumps(resp, ensure_ascii=True)}
 
-        text_parts: list[str] = []
-        content = result.get("content")
-        if isinstance(content, list):
-            for item in content:
-                if not isinstance(item, dict):
-                    continue
-                text_val = item.get("text")
-                if item.get("type") == "text" and isinstance(text_val, str):
-                    text_parts.append(text_val)
+            text_parts: list[str] = []
+            content = result.get("content")
+            if isinstance(content, list):
+                for item in content:
+                    if not isinstance(item, dict):
+                        continue
+                    text_val = item.get("text")
+                    if item.get("type") == "text" and isinstance(text_val, str):
+                        text_parts.append(text_val)
 
-        text = "\n".join(text_parts).strip()
-        return {"text": text or json.dumps(result, ensure_ascii=True), "raw": result}
+            text = "\n".join(text_parts).strip()
+            return {
+                "text": text or json.dumps(result, ensure_ascii=True),
+                "raw": result,
+            }
 
     def _make_client(self, cfg: McpServerConfig) -> Any:
         transport = (cfg.transport or "auto").lower().strip()

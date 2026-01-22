@@ -9,6 +9,13 @@ description = "Plotrix：面向 TRPG 的终端聊天工具（含骰子与 TUI �
 requires-python = ">=3.9"
 license = {text = "MIT"}
 
+[project.optional-dependencies]
+# Web UI is optional to keep base install lightweight.
+web = [
+  "fastapi>=0.110",
+  "uvicorn>=0.23",
+]
+
 [project.scripts]
 plotrix = "plotrix.cli:main"
 

@@ -32,6 +32,25 @@ def _cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_web(args: argparse.Namespace) -> int:
+    # Web UI is an optional extra.
+    try:
+        from .web.server import serve
+    except Exception:
+        print("Web UI 依赖未安装。请运行: pip install 'plotrix[web]'")
+        return 2
+
+    cfg_path = Path(args.config) if args.config else None
+    return int(
+        serve(
+            host=str(args.host),
+            port=int(args.port),
+            open_browser=not bool(args.no_open),
+            config_path=cfg_path,
+        )
+    )
+
+
 def _print_help_in_chat() -> None:
     print("命令：/roll 表达式, /config, /reset, /exit")
 
@@ -137,6 +156,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_cfg.add_argument("--path", help="配置文件路径")
     p_cfg.add_argument("--print-json", action="store_true")
     p_cfg.set_defaults(func=_cmd_config)
+
+    p_web = sub.add_parser("web", help="启动本机 Web UI（localhost）")
+    p_web.add_argument("--host", default="127.0.0.1")
+    p_web.add_argument("--port", default=8787, type=int)
+    p_web.add_argument("--config", help="配置文件路径")
+    p_web.add_argument(
+        "--no-open",
+        action="store_true",
+        help="不自动打开浏览器",
+    )
+    p_web.set_defaults(func=_cmd_web)
 
     return p
 
