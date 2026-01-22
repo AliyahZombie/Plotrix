@@ -81,7 +81,9 @@ def _parse_term(s: str, i: int) -> tuple[_IntTerm | _DiceTerm, int]:
 
             break
 
-        return _DiceTerm(count=count, sides=sides, keep_drop=keep_drop, explode=explode), i
+        return _DiceTerm(
+            count=count, sides=sides, keep_drop=keep_drop, explode=explode
+        ), i
 
     if n is None:
         raise DiceSyntaxError("expected a number or dice term")
@@ -169,7 +171,9 @@ def roll_expression(expression: str, seed: int | None = None) -> dict:
             subtotal = sign * term.value
             total += subtotal
             term_texts.append(str(subtotal))
-            details.append({"type": "int", "sign": sign, "value": term.value, "subtotal": subtotal})
+            details.append(
+                {"type": "int", "sign": sign, "value": term.value, "subtotal": subtotal}
+            )
             continue
 
         rolls, kept = _eval_dice(term, rng)

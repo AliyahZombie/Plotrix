@@ -1,6 +1,6 @@
 import unittest
 
-from trpgai.dice import DiceSyntaxError, roll_expression
+from plotrix.dice import DiceSyntaxError, roll_expression
 
 
 class TestDice(unittest.TestCase):

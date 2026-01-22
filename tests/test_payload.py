@@ -1,8 +1,8 @@
 import unittest
 from unittest import mock
 
-from trpgai.config import AppConfig, ChatConfig, ProviderConfig
-from trpgai.openai_client import ChatClient, ChatMessage
+from plotrix.config import AppConfig, ChatConfig, ProviderConfig
+from plotrix.openai_client import ChatClient, ChatMessage
 
 
 class TestPayload(unittest.TestCase):

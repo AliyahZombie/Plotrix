@@ -9,7 +9,14 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from .config import AppConfig, McpConfig, McpServerConfig, ProviderConfig, default_config_path, save_config
+from .config import (
+    AppConfig,
+    McpConfig,
+    McpServerConfig,
+    ProviderConfig,
+    default_config_path,
+    save_config,
+)
 from .dice import DiceSyntaxError, roll_expression
 from .openai_client import ChatClient, ChatMessage
 from .tui_config import edit_config_tui_in_session
@@ -81,7 +88,9 @@ def _tool_name_from_call(call: dict[str, Any]) -> str:
     return ""
 
 
-def _format_tool_status(tool_call_id: str, call: dict[str, Any], state: str, elapsed_s: float | None) -> str:
+def _format_tool_status(
+    tool_call_id: str, call: dict[str, Any], state: str, elapsed_s: float | None
+) -> str:
     name = _tool_name_from_call(call)
     header = f"{state}"
     if name:
@@ -93,7 +102,9 @@ def _format_tool_status(tool_call_id: str, call: dict[str, Any], state: str, ela
     return header
 
 
-def run_chat_tui(cfg: AppConfig, share_roll: bool, config_path: Path | None = None) -> int:
+def run_chat_tui(
+    cfg: AppConfig, share_roll: bool, config_path: Path | None = None
+) -> int:
     try:
         locale.setlocale(locale.LC_ALL, "")
     except Exception:
@@ -112,7 +123,9 @@ def run_chat_tui(cfg: AppConfig, share_roll: bool, config_path: Path | None = No
     return int(c.wrapper(inner))
 
 
-def _ensure_system_message(messages: list[ChatMessage], system_prompt: str) -> list[ChatMessage]:
+def _ensure_system_message(
+    messages: list[ChatMessage], system_prompt: str
+) -> list[ChatMessage]:
     out = list(messages)
 
     if out and out[0].role == "system":
@@ -153,13 +166,25 @@ def _slice_to_cols(s: str, start: int, max_cols: int) -> tuple[str, int]:
     return "".join(out), i
 
 
-def _wrap_transcript(transcript: list[tuple[str, str]], width: int) -> list[tuple[str, str]]:
+def _wrap_transcript(
+    transcript: list[tuple[str, str]], width: int
+) -> list[tuple[str, str]]:
     lines: list[tuple[str, str]] = []
     w = max(10, width)
 
+    # Keep internal role ids stable (for coloring), but show Chinese labels.
+    role_label = {
+        "you": "你",
+        "ai": "助手",
+        "sys": "系统",
+        "err": "错误",
+        "tool": "工具",
+    }
+
     for who, text in transcript:
-        prefix = f"{who}> "
-        avail = max(4, w - len(prefix) - 1)
+        prefix = f"{role_label.get(who, who)}> "
+        prefix_cols = _wcswidth(prefix)
+        avail = max(4, w - prefix_cols - 1)
         parts = text.splitlines() or [""]
         first = True
         for part in parts:
@@ -169,7 +194,7 @@ def _wrap_transcript(transcript: list[tuple[str, str]], width: int) -> list[tupl
                     lines.append((who, prefix + seg))
                     first = False
                 else:
-                    lines.append((who, " " * len(prefix) + seg))
+                    lines.append((who, " " * prefix_cols + seg))
             first = False
 
         lines.append((who, ""))
@@ -177,7 +202,9 @@ def _wrap_transcript(transcript: list[tuple[str, str]], width: int) -> list[tupl
     return lines
 
 
-def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path) -> int:
+def _chat_loop(
+    c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
+) -> int:
     c.curs_set(1)
     stdscr.keypad(True)
 
@@ -194,7 +221,7 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
     messages: list[ChatMessage] = _ensure_system_message([], cfg.chat.system_prompt)
 
     transcript: list[tuple[str, str]] = []
-    transcript.append(("sys", "TRPGAI TUI chat. /help for commands."))
+    transcript.append(("sys", "Plotrix 终端聊天。输入 /help 查看命令。"))
 
     input_buf = ""
     cursor = 0
@@ -234,11 +261,12 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
 
             stdscr.addnstr(row, 0, line, max(0, w - 1), attr)
 
-        hint = "PgUp/PgDn scroll  Enter send  /roll  /config  /model  /mcp  /reset  /exit"
+        hint = "PgUp/PgDn 滚动  Enter 发送  /roll  /config  /model  /mcp  /reset  /exit"
         stdscr.addnstr(h - 2, 0, status or hint, max(0, w - 1))
 
-        prompt = "you> "
-        avail_cols = max(1, w - len(prompt) - 1)
+        prompt = "你> "
+        prompt_cols = _wcswidth(prompt)
+        avail_cols = max(1, w - prompt_cols - 1)
 
         hoff = 0
         while hoff < cursor and _wcswidth(input_buf[hoff:cursor]) > avail_cols:
@@ -247,7 +275,7 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
         visible, _end = _slice_to_cols(input_buf, hoff, avail_cols)
         stdscr.addnstr(h - 1, 0, prompt + visible, max(0, w - 1))
 
-        cur_x = len(prompt) + _wcswidth(input_buf[hoff:cursor])
+        cur_x = prompt_cols + _wcswidth(input_buf[hoff:cursor])
         stdscr.move(h - 1, min(int(cur_x), max(0, w - 1)))
 
         stdscr.refresh()
@@ -269,7 +297,7 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
             continue
 
         if ch in (3, "\x03"):
-            append("sys", "(exit)")
+            append("sys", "（退出）")
             break
 
         if isinstance(ch, int) and ch in (c.KEY_PPAGE,):
@@ -322,18 +350,18 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
                 continue
 
             if line in {"/exit", "/quit"}:
-                append("sys", "(exit)")
+                append("sys", "（退出）")
                 break
 
             if line in {"/help", "help", "?"}:
                 append(
                     "sys",
-                    "commands: /roll EXPR, /config, /provider [name], /providers, /models, /model provider:model, /mcp, /reset, /exit",
+                    "命令：/roll 表达式, /config, /provider [name], /providers, /models, /model provider:model, /mcp, /reset, /exit",
                 )
                 continue
 
             if line.startswith("/reset"):
-                transcript = [("sys", "(session reset)")]
+                transcript = [("sys", "（会话已重置）")]
                 messages = _ensure_system_message([], cfg.chat.system_prompt)
                 continue
 
@@ -345,7 +373,7 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
                     st = client.mcp_status()
                     names = list(cfg.mcp.servers.keys())
                     if not names:
-                        append("sys", "mcp: no servers configured")
+                        append("sys", "MCP：未配置服务器")
                         return
 
                     lines: list[str] = []
@@ -395,10 +423,13 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
                             base += f" url={url}"
                         lines.append(base)
                         if last_error:
-                            lines.append(f"    last_error: {last_error}")
+                            lines.append(f"    最近错误: {last_error}")
 
-                    append("sys", "mcp servers:\n" + "\n".join(lines))
-                    append("sys", f"mcp: ok={ok} err={err} off={off} tools_total={tools_total}")
+                    append("sys", "MCP 服务器：\n" + "\n".join(lines))
+                    append(
+                        "sys",
+                        f"MCP：正常={ok} 错误={err} 关闭={off} 工具总数={tools_total}",
+                    )
 
                 if sub in {"status", "list"}:
                     render_status()
@@ -407,19 +438,22 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
                 if sub == "sync":
                     target = parts[2] if len(parts) >= 3 else None
                     if target is not None and target not in cfg.mcp.servers:
-                        append("err", f"unknown mcp server: {target}")
+                        append("err", f"未知 MCP 服务器: {target}")
                         continue
                     if target is not None and not cfg.mcp.servers[target].enabled:
-                        append("err", f"mcp server disabled: {target} (use /mcp on {target})")
+                        append(
+                            "err",
+                            f"MCP 服务器已禁用: {target}（使用 /mcp on {target} 启用）",
+                        )
                         continue
 
-                    append("sys", f"mcp: syncing{' ' + target if target else ''}...")
-                    status = "mcp syncing..."
+                    append("sys", f"MCP：正在同步{' ' + target if target else ''}...")
+                    status = "MCP：同步中..."
                     draw()
                     try:
                         client.mcp_sync(server_name=target)
                     except Exception as e:
-                        append("err", f"mcp sync failed: {e}")
+                        append("err", f"MCP 同步失败: {e}")
                         continue
                     render_status()
                     continue
@@ -427,17 +461,17 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
                 if sub == "tools":
                     target = parts[2] if len(parts) >= 3 else None
                     if target is not None and target not in cfg.mcp.servers:
-                        append("err", f"unknown mcp server: {target}")
+                        append("err", f"未知 MCP 服务器: {target}")
                         continue
 
                     try:
                         tools = client.mcp_tools(server_name=target)
                     except Exception as e:
-                        append("err", f"mcp tools failed: {e}")
+                        append("err", f"获取 MCP 工具失败: {e}")
                         continue
 
                     if not tools:
-                        append("sys", "mcp: no tools loaded (try /mcp sync)")
+                        append("sys", "MCP：未加载工具（可尝试 /mcp sync）")
                         continue
 
                     lines: list[str] = []
@@ -450,16 +484,16 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
                             desc = desc.splitlines()[0]
                         lines.append(f"{server}: {mcp_name} -> {public}  {desc}")
 
-                    append("sys", "mcp tools:\n" + "\n".join(lines))
+                    append("sys", "MCP 工具：\n" + "\n".join(lines))
                     continue
 
                 if sub in {"on", "off", "enable", "disable"}:
                     if len(parts) < 3:
-                        append("err", "usage: /mcp on|off <server>")
+                        append("err", "用法：/mcp on|off <server>")
                         continue
                     name = parts[2]
                     if name not in cfg.mcp.servers:
-                        append("err", f"unknown mcp server: {name} (edit via /config)")
+                        append("err", f"未知 MCP 服务器: {name}（可通过 /config 编辑）")
                         continue
 
                     enabled = sub in {"on", "enable"}
@@ -482,47 +516,55 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
                     )
                     save_config(cfg, path)
                     client = ChatClient(cfg)
-                    append("sys", f"mcp server {name}: enabled={enabled}")
+                    append("sys", f"MCP 服务器 {name}: {'启用' if enabled else '禁用'}")
                     render_status()
                     continue
 
-                append("err", "usage: /mcp [status|list|sync [server]|tools [server]|on <server>|off <server>]")
+                append(
+                    "err",
+                    "用法：/mcp [status|list|sync [server]|tools [server]|on <server>|off <server>]",
+                )
                 continue
 
             if line.startswith("/providers"):
                 names = list(cfg.providers.keys())
                 if not names:
-                    append("sys", "no providers configured")
+                    append("sys", "未配置 provider")
                     continue
                 shown = []
                 for name in names:
                     mark = "*" if name == cfg.active_provider else " "
                     shown.append(f"{mark} {name}")
-                append("sys", "providers:\n" + "\n".join(shown))
+                append("sys", "providers：\n" + "\n".join(shown))
                 continue
 
             if line.startswith("/models"):
                 p = cfg.providers.get(cfg.active_provider)
                 if p is None:
-                    append("err", "active provider not found")
+                    append("err", "未找到当前 provider")
                     continue
                 models = p.models or ([] if not p.model else [p.model])
                 shown = []
                 for m in models:
                     mark = "*" if m == p.model else " "
                     shown.append(f"{mark} {m}")
-                append("sys", f"models for {cfg.active_provider}:\n" + "\n".join(shown))
+                append("sys", f"{cfg.active_provider} 的模型：\n" + "\n".join(shown))
                 continue
 
             if line.startswith("/provider"):
                 arg = line[len("/provider") :].strip()
                 if not arg:
-                    append("sys", f"active provider: {cfg.active_provider}")
+                    append("sys", f"当前 provider: {cfg.active_provider}")
                     continue
                 if arg not in cfg.providers:
-                    append("err", f"unknown provider: {arg}")
+                    append("err", f"未知 provider: {arg}")
                     continue
-                cfg = AppConfig(active_provider=arg, providers=cfg.providers, chat=cfg.chat, mcp=cfg.mcp)
+                cfg = AppConfig(
+                    active_provider=arg,
+                    providers=cfg.providers,
+                    chat=cfg.chat,
+                    mcp=cfg.mcp,
+                )
                 save_config(cfg, path)
                 client = ChatClient(cfg)
                 append("sys", f"switched provider: {arg}")
@@ -534,7 +576,7 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
                 if not arg:
                     p = cfg.providers.get(cfg.active_provider)
                     cur = p.model if p is not None else ""
-                    append("sys", f"active model: {cfg.active_provider}:{cur}")
+                    append("sys", f"当前模型: {cfg.active_provider}:{cur}")
                     continue
 
                 if ":" in arg:
@@ -546,12 +588,12 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
                     model = arg.strip()
 
                 if not prov or not model:
-                    append("err", "usage: /model provider:model")
+                    append("err", "用法：/model provider:model")
                     continue
 
                 p = cfg.providers.get(prov)
                 if p is None:
-                    append("err", f"unknown provider: {prov}")
+                    append("err", f"未知 provider: {prov}")
                     continue
 
                 models = list(p.models)
@@ -569,13 +611,16 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
                     model=model,
                 )
 
-                cfg = AppConfig(active_provider=prov, providers=providers, chat=cfg.chat, mcp=cfg.mcp)
+                cfg = AppConfig(
+                    active_provider=prov,
+                    providers=providers,
+                    chat=cfg.chat,
+                    mcp=cfg.mcp,
+                )
                 save_config(cfg, path)
                 client = ChatClient(cfg)
-                append("sys", f"switched model: {prov}:{model}")
+                append("sys", f"已切换模型: {prov}:{model}")
                 continue
-
-
 
             if line.startswith("/config"):
                 updated = edit_config_tui_in_session(c, stdscr, cfg, path)
@@ -583,13 +628,13 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
                 cfg = updated
                 client = ChatClient(cfg)
                 messages = _ensure_system_message(messages, cfg.chat.system_prompt)
-                append("sys", f"saved: {path}")
+                append("sys", f"已保存: {path}")
                 continue
 
             if line.startswith("/roll"):
                 expr = line[len("/roll") :].strip()
                 if not expr:
-                    append("err", "usage: /roll 2d6+1")
+                    append("err", "用法：/roll 2d6+1")
                     continue
                 try:
                     r = roll_expression(expr)
@@ -605,7 +650,7 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
             append("you", line)
             messages.append(ChatMessage(role="user", content=line))
 
-            status = "thinking..."
+            status = "思考中..."
             draw()
 
             stream_slot: int | None = None
@@ -614,15 +659,40 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
             last_event_draw = 0.0
 
             tool_status_slots: dict[str, tuple[int, float, dict[str, Any]]] = {}
+            # Stream-mode tool calls: render/update early to avoid end-of-turn "jump".
+            stream_tool_call_slots: dict[int, int] = {}
 
             def on_stream(ev: dict[str, Any]) -> None:
                 nonlocal stream_text, last_draw
-                if ev.get("type") == "content_delta":
+                t = ev.get("type")
+                if t == "content_delta":
                     d = ev.get("delta")
                     if isinstance(d, str) and d:
                         stream_text += d
-                        if stream_slot is not None and 0 <= stream_slot < len(transcript):
+                        if stream_slot is not None and 0 <= stream_slot < len(
+                            transcript
+                        ):
                             transcript[stream_slot] = ("ai", stream_text)
+
+                        now = time.monotonic()
+                        if now - last_draw >= 0.05:
+                            last_draw = now
+                            draw()
+
+                elif t == "tool_calls":
+                    calls = ev.get("tool_calls")
+                    if isinstance(calls, list):
+                        for i, call in enumerate(calls):
+                            if not isinstance(call, dict):
+                                continue
+                            rendered = _format_tool_call(call)
+                            slot = stream_tool_call_slots.get(i)
+                            if slot is None:
+                                slot = len(transcript)
+                                transcript.append(("tool", rendered))
+                                stream_tool_call_slots[i] = slot
+                            elif 0 <= slot < len(transcript):
+                                transcript[slot] = ("tool", rendered)
 
                         now = time.monotonic()
                         if now - last_draw >= 0.05:
@@ -643,9 +713,15 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
 
                     calls = ev.get("tool_calls")
                     if isinstance(calls, list):
-                        for call in calls:
-                            if isinstance(call, dict):
-                                append("tool", _format_tool_call(call))
+                        for i, call in enumerate(calls):
+                            if not isinstance(call, dict):
+                                continue
+                            rendered = _format_tool_call(call)
+                            slot = stream_tool_call_slots.get(i)
+                            if slot is not None and 0 <= slot < len(transcript):
+                                transcript[slot] = ("tool", rendered)
+                            else:
+                                append("tool", rendered)
 
                 elif t == "tool_result":
                     tool_call_id = ev.get("tool_call_id")
@@ -656,7 +732,12 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
                         slot, start_t, call = tool_status_slots[tool_call_id_s]
                         elapsed = time.monotonic() - start_t
                         if 0 <= slot < len(transcript):
-                            transcript[slot] = ("tool", _format_tool_status(tool_call_id_s, call, "DONE", elapsed))
+                            transcript[slot] = (
+                                "tool",
+                                _format_tool_status(
+                                    tool_call_id_s, call, "DONE", elapsed
+                                ),
+                            )
                         tool_status_slots.pop(tool_call_id_s, None)
 
                     append("tool", _format_tool_result(tool_call_id_s or None, content))
@@ -669,8 +750,19 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
 
                     if tool_call_id_s:
                         slot = len(transcript)
-                        transcript.append(("tool", _format_tool_status(tool_call_id_s, call_d, "RUNNING", None)))
-                        tool_status_slots[tool_call_id_s] = (slot, time.monotonic(), call_d)
+                        transcript.append(
+                            (
+                                "tool",
+                                _format_tool_status(
+                                    tool_call_id_s, call_d, "RUNNING", None
+                                ),
+                            )
+                        )
+                        tool_status_slots[tool_call_id_s] = (
+                            slot,
+                            time.monotonic(),
+                            call_d,
+                        )
 
                 elif t == "assistant_final":
                     content = ev.get("content")
@@ -680,7 +772,7 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
 
                 elif t == "mcp_error":
                     err = ev.get("error")
-                    append("err", f"mcp error: {err}")
+                    append("err", f"MCP 错误: {err}")
 
                 now = time.monotonic()
                 if now - last_event_draw >= 0.02:
@@ -692,15 +784,19 @@ def _chat_loop(c: Any, stdscr: Any, cfg: AppConfig, share_roll: bool, path: Path
                 transcript.append(("ai", ""))
 
             try:
-                _assistant_text, new_messages = client.chat(messages, on_stream=on_stream, on_event=on_event)
+                _assistant_text, new_messages = client.chat(
+                    messages, on_stream=on_stream, on_event=on_event
+                )
             except Exception as e:
                 if stream_slot is not None and stream_slot < len(transcript):
                     transcript.pop(stream_slot)
-                append("err", f"error: {e}")
+                append("err", f"错误: {e}")
                 continue
 
             if stream_slot is not None and stream_slot < len(transcript):
-                transcript.pop(stream_slot)
+                # Streaming placeholder: keep it if we actually streamed visible content.
+                if not (cfg.chat.stream and stream_text):
+                    transcript.pop(stream_slot)
 
             messages = new_messages
             continue

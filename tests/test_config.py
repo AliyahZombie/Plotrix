@@ -2,7 +2,13 @@ import os
 import unittest
 from pathlib import Path
 
-from trpgai.config import AppConfig, ChatConfig, ProviderConfig, load_config, save_config
+from plotrix.config import (
+    AppConfig,
+    ChatConfig,
+    ProviderConfig,
+    load_config,
+    save_config,
+)
 
 
 class TestConfig(unittest.TestCase):
@@ -46,12 +52,12 @@ class TestConfig(unittest.TestCase):
         tmp = Path("tests") / "_tmp_config.json"
         try:
             save_config(AppConfig(), tmp)
-            os.environ["TRPGAI_API_KEY"] = "from-env"
+            os.environ["PLOTRIX_API_KEY"] = "from-env"
             loaded = load_config(tmp)
             p = loaded.providers[loaded.active_provider]
             self.assertEqual(p.api_key, "from-env")
         finally:
-            os.environ.pop("TRPGAI_API_KEY", None)
+            os.environ.pop("PLOTRIX_API_KEY", None)
             try:
                 tmp.unlink()
             except OSError:

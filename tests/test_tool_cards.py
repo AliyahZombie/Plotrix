@@ -1,6 +1,6 @@
 import unittest
 
-from trpgai.tui_chat import _format_tool_call, _format_tool_result
+from plotrix.tui_chat import _format_tool_call, _format_tool_result
 
 
 class TestToolCards(unittest.TestCase):

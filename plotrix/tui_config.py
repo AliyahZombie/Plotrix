@@ -31,7 +31,9 @@ def edit_config_tui(cfg: AppConfig, path: Path) -> AppConfig:
         return cfg
 
 
-def edit_config_tui_in_session(c: Any, stdscr: Any, cfg: AppConfig, path: Path) -> AppConfig:
+def edit_config_tui_in_session(
+    c: Any, stdscr: Any, cfg: AppConfig, path: Path
+) -> AppConfig:
     try:
         return _edit_config(c, stdscr, cfg, path)
     except TuiCancelled:
@@ -96,34 +98,128 @@ def _edit_config(c: Any, stdscr: Any, cfg: AppConfig, path: Path) -> AppConfig:
                 p["model"] = models[0]
 
         return [
-            {"key": "active_provider", "kind": "str", "get": lambda: str(work.get("active_provider", "default")), "set": lambda v: work.__setitem__("active_provider", str(v) or "default")},
-
-            {"key": f"providers.{active}.base_url", "kind": "str", "get": lambda: str(p.get("base_url", "")), "set": lambda v: p.__setitem__("base_url", v)},
-            {"key": f"providers.{active}.api_key", "kind": "secret", "get": lambda: _mask_secret(str(p.get("api_key", ""))), "set": lambda v: p.__setitem__("api_key", v)},
-            {"key": f"providers.{active}.model", "kind": "str", "get": lambda: str(p.get("model", "")), "set": lambda v: p.__setitem__("model", v)},
-            {"key": f"providers.{active}.models", "kind": "text", "get": get_models_text, "set": set_models_text},
-            {"key": f"providers.{active}.timeout_s", "kind": "float", "get": lambda: str(p.get("timeout_s", "")), "set": lambda v: p.__setitem__("timeout_s", v)},
-            {"key": f"providers.{active}.verify_tls", "kind": "bool", "get": lambda: bool(p.get("verify_tls", True)), "set": lambda v: p.__setitem__("verify_tls", v)},
-            {"key": f"providers.{active}.extra_headers", "kind": "json", "get": lambda: json.dumps(p.get("extra_headers", {}) or {}, ensure_ascii=True), "set": lambda v: p.__setitem__("extra_headers", v)},
-
-            {"key": "mcp.servers", "kind": "json", "get": lambda: json.dumps(servers, ensure_ascii=True), "set": lambda v: mcp.__setitem__("servers", v)},
-
-            {"key": "chat.system_prompt", "kind": "text", "get": lambda: str(chat.get("system_prompt", "")), "set": lambda v: chat.__setitem__("system_prompt", v)},
-            {"key": "chat.temperature", "kind": "float_or_empty", "get": lambda: "" if chat.get("temperature") is None else str(chat.get("temperature")), "set": lambda v: chat.__setitem__("temperature", v)},
-            {"key": "chat.max_tokens", "kind": "int_or_empty", "get": lambda: "" if chat.get("max_tokens") is None else str(chat.get("max_tokens")), "set": lambda v: chat.__setitem__("max_tokens", v)},
-            {"key": "chat.max_completion_tokens", "kind": "int_or_empty", "get": lambda: "" if chat.get("max_completion_tokens") is None else str(chat.get("max_completion_tokens")), "set": lambda v: chat.__setitem__("max_completion_tokens", v)},
-            {"key": "chat.max_output_tokens", "kind": "int_or_empty", "get": lambda: "" if chat.get("max_output_tokens") is None else str(chat.get("max_output_tokens")), "set": lambda v: chat.__setitem__("max_output_tokens", v)},
-            {"key": "chat.stream", "kind": "bool", "get": lambda: bool(chat.get("stream", False)), "set": lambda v: chat.__setitem__("stream", v)},
-            {"key": "chat.enable_tool_roll", "kind": "bool", "get": lambda: bool(chat.get("enable_tool_roll", True)), "set": lambda v: chat.__setitem__("enable_tool_roll", v)},
+            {
+                "key": "active_provider",
+                "kind": "str",
+                "get": lambda: str(work.get("active_provider", "default")),
+                "set": lambda v: work.__setitem__(
+                    "active_provider", str(v) or "default"
+                ),
+            },
+            {
+                "key": f"providers.{active}.base_url",
+                "kind": "str",
+                "get": lambda: str(p.get("base_url", "")),
+                "set": lambda v: p.__setitem__("base_url", v),
+            },
+            {
+                "key": f"providers.{active}.api_key",
+                "kind": "secret",
+                "get": lambda: _mask_secret(str(p.get("api_key", ""))),
+                "set": lambda v: p.__setitem__("api_key", v),
+            },
+            {
+                "key": f"providers.{active}.model",
+                "kind": "str",
+                "get": lambda: str(p.get("model", "")),
+                "set": lambda v: p.__setitem__("model", v),
+            },
+            {
+                "key": f"providers.{active}.models",
+                "kind": "text",
+                "get": get_models_text,
+                "set": set_models_text,
+            },
+            {
+                "key": f"providers.{active}.timeout_s",
+                "kind": "float",
+                "get": lambda: str(p.get("timeout_s", "")),
+                "set": lambda v: p.__setitem__("timeout_s", v),
+            },
+            {
+                "key": f"providers.{active}.verify_tls",
+                "kind": "bool",
+                "get": lambda: bool(p.get("verify_tls", True)),
+                "set": lambda v: p.__setitem__("verify_tls", v),
+            },
+            {
+                "key": f"providers.{active}.extra_headers",
+                "kind": "json",
+                "get": lambda: json.dumps(
+                    p.get("extra_headers", {}) or {}, ensure_ascii=True
+                ),
+                "set": lambda v: p.__setitem__("extra_headers", v),
+            },
+            {
+                "key": "mcp.servers",
+                "kind": "json",
+                "get": lambda: json.dumps(servers, ensure_ascii=True),
+                "set": lambda v: mcp.__setitem__("servers", v),
+            },
+            {
+                "key": "chat.system_prompt",
+                "kind": "text",
+                "get": lambda: str(chat.get("system_prompt", "")),
+                "set": lambda v: chat.__setitem__("system_prompt", v),
+            },
+            {
+                "key": "chat.temperature",
+                "kind": "float_or_empty",
+                "get": lambda: ""
+                if chat.get("temperature") is None
+                else str(chat.get("temperature")),
+                "set": lambda v: chat.__setitem__("temperature", v),
+            },
+            {
+                "key": "chat.max_tokens",
+                "kind": "int_or_empty",
+                "get": lambda: ""
+                if chat.get("max_tokens") is None
+                else str(chat.get("max_tokens")),
+                "set": lambda v: chat.__setitem__("max_tokens", v),
+            },
+            {
+                "key": "chat.max_completion_tokens",
+                "kind": "int_or_empty",
+                "get": lambda: ""
+                if chat.get("max_completion_tokens") is None
+                else str(chat.get("max_completion_tokens")),
+                "set": lambda v: chat.__setitem__("max_completion_tokens", v),
+            },
+            {
+                "key": "chat.max_output_tokens",
+                "kind": "int_or_empty",
+                "get": lambda: ""
+                if chat.get("max_output_tokens") is None
+                else str(chat.get("max_output_tokens")),
+                "set": lambda v: chat.__setitem__("max_output_tokens", v),
+            },
+            {
+                "key": "chat.stream",
+                "kind": "bool",
+                "get": lambda: bool(chat.get("stream", False)),
+                "set": lambda v: chat.__setitem__("stream", v),
+            },
+            {
+                "key": "chat.enable_tool_roll",
+                "kind": "bool",
+                "get": lambda: bool(chat.get("enable_tool_roll", True)),
+                "set": lambda v: chat.__setitem__("enable_tool_roll", v),
+            },
         ]
 
     def draw() -> None:
         nonlocal status
         stdscr.erase()
         h, w = stdscr.getmaxyx()
-        title = f"trpgai config: {path}"
+        title = f"Plotrix 配置: {path}"
         stdscr.addnstr(0, 0, title, w - 1)
-        stdscr.addnstr(1, 0, "UP/DOWN: select  ENTER: edit  SPACE: toggle bool  s: save  q/ESC: cancel", w - 1)
+        stdscr.addnstr(
+            1,
+            0,
+            "UP/DOWN：选择  ENTER：编辑  SPACE：切换布尔  s：保存  q/ESC：取消",
+            w - 1,
+        )
 
         fs = fields()
         top = 0
@@ -155,7 +251,12 @@ def _edit_config(c: Any, stdscr: Any, cfg: AppConfig, path: Path) -> AppConfig:
 
         win = c.newwin(win_h, win_w, y, x)
         win.border()
-        win.addnstr(0, 2, " edit (CTRL+G to finish) " if multiline else " edit (ENTER to finish) ", win_w - 4)
+        win.addnstr(
+            0,
+            2,
+            " 编辑（CTRL+G 完成） " if multiline else " 编辑（ENTER 完成） ",
+            win_w - 4,
+        )
 
         box = c.newwin(win_h - 2, win_w - 2, y + 1, x + 1)
         box.erase()
@@ -198,7 +299,7 @@ def _edit_config(c: Any, stdscr: Any, cfg: AppConfig, path: Path) -> AppConfig:
             try:
                 return _dict_to_config(work)
             except Exception as e:
-                status = f"invalid config: {e}"
+                status = f"配置无效: {e}"
             continue
 
         fs = fields()
@@ -215,7 +316,9 @@ def _edit_config(c: Any, stdscr: Any, cfg: AppConfig, path: Path) -> AppConfig:
 
         try:
             if kind in {"str", "secret"}:
-                s = prompt_text("" if kind == "secret" else str(f["get"]()), multiline=False)
+                s = prompt_text(
+                    "" if kind == "secret" else str(f["get"]()), multiline=False
+                )
                 f["set"](s)
 
             elif kind == "float":

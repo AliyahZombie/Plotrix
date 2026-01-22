@@ -30,7 +30,11 @@ def _accumulate_tool_calls(
 
         cur = by_index.get(idx)
         if cur is None:
-            cur = {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
+            cur = {
+                "id": "",
+                "type": "function",
+                "function": {"name": "", "arguments": ""},
+            }
             by_index[idx] = cur
 
         if "id" in item and item.get("id") is not None:
@@ -176,7 +180,9 @@ class ChatClient:
                 payload["temperature"] = float(temp)
 
             if self._cfg.chat.max_completion_tokens is not None:
-                payload["max_completion_tokens"] = int(self._cfg.chat.max_completion_tokens)
+                payload["max_completion_tokens"] = int(
+                    self._cfg.chat.max_completion_tokens
+                )
             elif self._cfg.chat.max_output_tokens is not None:
                 payload["max_output_tokens"] = int(self._cfg.chat.max_output_tokens)
             elif self._cfg.chat.max_tokens is not None:
@@ -196,9 +202,17 @@ class ChatClient:
                 try:
                     if callable(on_stream):
                         on_stream({"type": "start"})
-                    assistant_content, tool_calls = self._post_json_stream(endpoint, payload, on_stream=on_stream)
+                    assistant_content, tool_calls = self._post_json_stream(
+                        endpoint, payload, on_stream=on_stream
+                    )
                     if callable(on_stream):
-                        on_stream({"type": "end", "content": assistant_content or "", "tool_calls": tool_calls})
+                        on_stream(
+                            {
+                                "type": "end",
+                                "content": assistant_content or "",
+                                "tool_calls": tool_calls,
+                            }
+                        )
                 except Exception:
                     stream_enabled = False
                     payload.pop("stream", None)
@@ -233,6 +247,13 @@ class ChatClient:
                     ]
 
             if tool_calls:
+                # Some providers omit id; we need a stable id to tie UI + tool results.
+                for i, call in enumerate(tool_calls):
+                    if not isinstance(call, dict):
+                        continue
+                    if not call.get("id"):
+                        call["id"] = f"call_{i}"  # noqa: PERF401
+
                 current.append(
                     ChatMessage(
                         role="assistant",
@@ -253,11 +274,13 @@ class ChatClient:
                     if not isinstance(call, dict):
                         continue
 
-                    # Some providers omit id; we need a stable id to tie UI + tool results.
-                    if not call.get("id"):
-                        call["id"] = f"call_{i}"  # noqa: PERF401
-
-                    emit({"type": "tool_start", "call": call, "tool_call_id": str(call.get("id") or "")})
+                    emit(
+                        {
+                            "type": "tool_start",
+                            "call": call,
+                            "tool_call_id": str(call.get("id") or ""),
+                        }
+                    )
 
                     tool_msg = self._handle_tool_call(call)
                     current.append(tool_msg)
@@ -272,7 +295,9 @@ class ChatClient:
 
                 continue
 
-            current.append(ChatMessage(role="assistant", content=str(assistant_content or "")))
+            current.append(
+                ChatMessage(role="assistant", content=str(assistant_content or ""))
+            )
             emit({"type": "assistant_final", "content": str(assistant_content or "")})
             return str(assistant_content or ""), current
 
@@ -299,7 +324,9 @@ class ChatClient:
                     result = self._mcp.call_tool(name, args)
                 except McpError as e:
                     content = json.dumps({"error": str(e)}, ensure_ascii=True)
-                    return ChatMessage(role="tool", tool_call_id=call_id, content=content)
+                    return ChatMessage(
+                        role="tool", tool_call_id=call_id, content=content
+                    )
 
                 content = json.dumps(result, ensure_ascii=True)
                 return ChatMessage(role="tool", tool_call_id=call_id, content=content)
@@ -320,7 +347,9 @@ class ChatClient:
         seed = args.get("seed")
 
         if not isinstance(expr, str) or not expr.strip():
-            content = json.dumps({"error": "roll_dice requires expression"}, ensure_ascii=True)
+            content = json.dumps(
+                {"error": "roll_dice requires expression"}, ensure_ascii=True
+            )
             return ChatMessage(role="tool", tool_call_id=call_id, content=content)
 
         seed_i: int | None = None
@@ -333,7 +362,9 @@ class ChatClient:
         try:
             rolled = roll_expression(expr, seed=seed_i)
         except DiceSyntaxError as e:
-            content = json.dumps({"error": str(e), "expression": expr}, ensure_ascii=True)
+            content = json.dumps(
+                {"error": str(e), "expression": expr}, ensure_ascii=True
+            )
             return ChatMessage(role="tool", tool_call_id=call_id, content=content)
 
         content = json.dumps(rolled, ensure_ascii=True)
@@ -361,7 +392,9 @@ class ChatClient:
             context = ssl._create_unverified_context()
 
         try:
-            with urllib.request.urlopen(req, timeout=float(provider.timeout_s), context=context) as resp:
+            with urllib.request.urlopen(
+                req, timeout=float(provider.timeout_s), context=context
+            ) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
         except urllib.error.HTTPError as e:
             raw = e.read().decode("utf-8", errors="replace")
@@ -413,7 +446,9 @@ class ChatClient:
                 on_stream(event)
 
         try:
-            with urllib.request.urlopen(req, timeout=float(provider.timeout_s), context=context) as resp:
+            with urllib.request.urlopen(
+                req, timeout=float(provider.timeout_s), context=context
+            ) as resp:
                 while True:
                     raw = resp.readline()
                     if not raw:
@@ -453,7 +488,9 @@ class ChatClient:
                         assistant_parts.append(content_delta)
                         emit({"type": "content_delta", "delta": content_delta})
 
-                    tool_calls_acc = _accumulate_tool_calls(tool_calls_acc, delta.get("tool_calls"))
+                    tool_calls_acc = _accumulate_tool_calls(
+                        tool_calls_acc, delta.get("tool_calls")
+                    )
                     if tool_calls_acc:
                         emit({"type": "tool_calls", "tool_calls": tool_calls_acc})
 

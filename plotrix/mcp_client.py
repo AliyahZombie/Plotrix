@@ -63,7 +63,9 @@ def _iter_sse_events(resp: Any) -> Any:
         yield event_name, "\n".join(data_lines)
 
 
-def _jsonrpc_request(method: str, params: dict[str, Any], request_id: int) -> dict[str, Any]:
+def _jsonrpc_request(
+    method: str, params: dict[str, Any], request_id: int
+) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
 
 
@@ -72,8 +74,11 @@ def _jsonrpc_notification(method: str, params: dict[str, Any]) -> dict[str, Any]
 
 
 def _jsonrpc_is_response(msg: Any) -> bool:
-    return isinstance(msg, dict) and msg.get("jsonrpc") == "2.0" and "id" in msg and (
-        "result" in msg or "error" in msg
+    return (
+        isinstance(msg, dict)
+        and msg.get("jsonrpc") == "2.0"
+        and "id" in msg
+        and ("result" in msg or "error" in msg)
     )
 
 
@@ -132,7 +137,9 @@ class _StreamableHttpTransport:
         except Exception:
             pass
 
-    def _post(self, payload: dict[str, Any], expect_response: bool = True) -> dict[str, Any]:
+    def _post(
+        self, payload: dict[str, Any], expect_response: bool = True
+    ) -> dict[str, Any]:
         url = self._server.url
         headers = {
             "Content-Type": "application/json",
@@ -155,7 +162,9 @@ class _StreamableHttpTransport:
             context = ssl._create_unverified_context()
 
         try:
-            with urllib.request.urlopen(req, timeout=float(self._server.timeout_s), context=context) as resp:
+            with urllib.request.urlopen(
+                req, timeout=float(self._server.timeout_s), context=context
+            ) as resp:
                 sid = resp.headers.get("MCP-Session-Id")
                 if sid:
                     self._session_id = str(sid)
@@ -280,7 +289,9 @@ class _LegacySseTransport:
             context = ssl._create_unverified_context()
 
         try:
-            with urllib.request.urlopen(req, timeout=float(self._server.timeout_s), context=context) as resp:
+            with urllib.request.urlopen(
+                req, timeout=float(self._server.timeout_s), context=context
+            ) as resp:
                 sid = resp.headers.get("MCP-Session-Id")
                 if sid:
                     self._session_id = str(sid)
@@ -333,7 +344,9 @@ class _LegacySseTransport:
             context = ssl._create_unverified_context()
 
         try:
-            with urllib.request.urlopen(req, timeout=float(self._server.timeout_s), context=context) as resp:
+            with urllib.request.urlopen(
+                req, timeout=float(self._server.timeout_s), context=context
+            ) as resp:
                 sid = resp.headers.get("MCP-Session-Id")
                 if sid:
                     self._session_id = str(sid)
@@ -422,7 +435,7 @@ class McpManager:
             # Initialize handshake.
             init_params = {
                 "protocolVersion": cfg.protocol_version,
-                "clientInfo": {"name": "trpgai", "version": "0.1"},
+                "clientInfo": {"name": "plotrix", "version": "0.1"},
                 "capabilities": {"tools": {}},
             }
 
@@ -431,7 +444,9 @@ class McpManager:
                     _ = client.call("initialize", init_params)
                 except McpError:
                     # auto-transport fallback: if streamable HTTP fails, try legacy SSE.
-                    if (cfg.transport or "auto").lower().strip() == "auto" and not isinstance(
+                    if (
+                        cfg.transport or "auto"
+                    ).lower().strip() == "auto" and not isinstance(
                         client, _LegacySseTransport
                     ):
                         client = _LegacySseTransport(cfg)
@@ -492,7 +507,9 @@ class McpManager:
             # Merge: keep other tools intact.
             keep = [t for t in self._tools if t.server != server_name]
             self._tools = keep + tools
-            self._public_to_tool = {k: v for k, v in self._public_to_tool.items() if v.server != server_name}
+            self._public_to_tool = {
+                k: v for k, v in self._public_to_tool.items() if v.server != server_name
+            }
             self._public_to_tool.update(public_to_tool)
 
     def openai_tools(self) -> list[dict[str, Any]]:
@@ -536,7 +553,9 @@ class McpManager:
         if client is None:
             raise McpError(f"mcp server not initialized: {tool.server}")
 
-        resp = client.call("tools/call", {"name": tool.mcp_name, "arguments": arguments})
+        resp = client.call(
+            "tools/call", {"name": tool.mcp_name, "arguments": arguments}
+        )
         result = resp.get("result")
         if not isinstance(result, dict):
             return {"text": json.dumps(resp, ensure_ascii=True)}

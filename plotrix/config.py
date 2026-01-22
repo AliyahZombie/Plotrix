@@ -15,7 +15,8 @@ def _xdg_config_home() -> Path:
 
 
 def default_config_path() -> Path:
-    return _xdg_config_home() / "trpgai" / "config.json"
+    base = _xdg_config_home()
+    return base / "plotrix" / "config.json"
 
 
 @dataclass(frozen=True)
@@ -32,7 +33,7 @@ class ProviderConfig:
 
 @dataclass(frozen=True)
 class ChatConfig:
-    system_prompt: str = "You are a helpful TRPG GM assistant."
+    system_prompt: str = "你是一位乐于助人的 TRPG 主持人（GM）助手。"
     temperature: float | None = None
 
     max_tokens: int | None = None
@@ -69,14 +70,18 @@ class McpConfig:
 @dataclass(frozen=True)
 class AppConfig:
     active_provider: str = "default"
-    providers: dict[str, ProviderConfig] = field(default_factory=lambda: {"default": ProviderConfig()})
+    providers: dict[str, ProviderConfig] = field(
+        default_factory=lambda: {"default": ProviderConfig()}
+    )
     chat: ChatConfig = field(default_factory=ChatConfig)
     mcp: McpConfig = field(default_factory=McpConfig)
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "AppConfig":
         data = data if isinstance(data, dict) else {}
-        chat_data = (data.get("chat") or {}) if isinstance(data.get("chat"), dict) else {}
+        chat_data = (
+            (data.get("chat") or {}) if isinstance(data.get("chat"), dict) else {}
+        )
 
         mcp_data = (data.get("mcp") or {}) if isinstance(data.get("mcp"), dict) else {}
         mcp_servers: dict[str, McpServerConfig] = {}
@@ -95,7 +100,9 @@ class AppConfig:
                 mcp_servers[name] = McpServerConfig(
                     url=str(s.get("url", "")),
                     transport=str(s.get("transport", McpServerConfig.transport)),
-                    protocol_version=str(s.get("protocol_version", McpServerConfig.protocol_version)),
+                    protocol_version=str(
+                        s.get("protocol_version", McpServerConfig.protocol_version)
+                    ),
                     timeout_s=float(s.get("timeout_s", McpServerConfig.timeout_s)),
                     verify_tls=bool(s.get("verify_tls", McpServerConfig.verify_tls)),
                     headers=headers,
@@ -160,8 +167,12 @@ class AppConfig:
                     "default": ProviderConfig(
                         base_url=str(api_data.get("base_url", ProviderConfig.base_url)),
                         api_key=str(api_data.get("api_key", "")),
-                        timeout_s=float(api_data.get("timeout_s", ProviderConfig.timeout_s)),
-                        verify_tls=bool(api_data.get("verify_tls", ProviderConfig.verify_tls)),
+                        timeout_s=float(
+                            api_data.get("timeout_s", ProviderConfig.timeout_s)
+                        ),
+                        verify_tls=bool(
+                            api_data.get("verify_tls", ProviderConfig.verify_tls)
+                        ),
                         extra_headers=extra_headers,
                         models=[model_s] if model_s else [ProviderConfig.model],
                         model=model_s or ProviderConfig.model,
@@ -201,7 +212,9 @@ class AppConfig:
             max_completion_tokens=opt_int("max_completion_tokens"),
             max_output_tokens=opt_int("max_output_tokens"),
             stream=bool(chat_data.get("stream", ChatConfig.stream)),
-            enable_tool_roll=bool(chat_data.get("enable_tool_roll", ChatConfig.enable_tool_roll)),
+            enable_tool_roll=bool(
+                chat_data.get("enable_tool_roll", ChatConfig.enable_tool_roll)
+            ),
         )
 
         return AppConfig(
@@ -218,7 +231,7 @@ class AppConfig:
 def load_config(path: Path | None = None) -> AppConfig:
     path = path or default_config_path()
 
-    api_key_env = os.environ.get("OPENAI_API_KEY") or os.environ.get("TRPGAI_API_KEY")
+    api_key_env = os.environ.get("OPENAI_API_KEY") or os.environ.get("PLOTRIX_API_KEY")
 
     if not path.exists():
         cfg = AppConfig()
@@ -235,7 +248,12 @@ def load_config(path: Path | None = None) -> AppConfig:
                     models=p.models,
                     model=p.model,
                 )
-                cfg = AppConfig(active_provider=cfg.active_provider, providers=providers, chat=cfg.chat, mcp=cfg.mcp)
+                cfg = AppConfig(
+                    active_provider=cfg.active_provider,
+                    providers=providers,
+                    chat=cfg.chat,
+                    mcp=cfg.mcp,
+                )
         return cfg
 
     try:
@@ -258,7 +276,12 @@ def load_config(path: Path | None = None) -> AppConfig:
                 models=p.models,
                 model=p.model,
             )
-            cfg = AppConfig(active_provider=cfg.active_provider, providers=providers, chat=cfg.chat, mcp=cfg.mcp)
+            cfg = AppConfig(
+                active_provider=cfg.active_provider,
+                providers=providers,
+                chat=cfg.chat,
+                mcp=cfg.mcp,
+            )
 
     return cfg
 
@@ -266,6 +289,7 @@ def load_config(path: Path | None = None) -> AppConfig:
 def save_config(cfg: AppConfig, path: Path | None = None) -> Path:
     path = path or default_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    text = json.dumps(cfg.to_dict(), ensure_ascii=True, indent=2, sort_keys=True)
+    # Keep Chinese readable in config file.
+    text = json.dumps(cfg.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
     path.write_text(text + "\n", encoding="utf-8")
     return path

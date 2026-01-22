@@ -1,7 +1,7 @@
 import re
 import unittest
 
-from trpgai.mcp_client import _mcp_tool_public_name
+from plotrix.mcp_client import _mcp_tool_public_name
 
 
 class TestMcpToolNaming(unittest.TestCase):
